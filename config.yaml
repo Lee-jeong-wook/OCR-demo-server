@@ -1,0 +1,41 @@
+server:
+  host: "0.0.0.0"
+  port: 5000
+  debug: true
+  secret_key: "secret-key"
+  max_buffer_size: 104857600
+
+models:
+  yolo:
+    path: "models/yolo/best.pt"
+    confidence: 0.28
+  
+  ocr:
+    path: "models/ocr/best.pth"
+    config:
+      img_height: 32
+      img_width: 100
+      input_channel: 1
+      output_channel: 256
+      hidden_size: 256
+      num_fiducial: 20
+      transformation: "TPS"
+      feature_extraction: "ResNet"
+      sequence_modeling: "BiLSTM"
+      prediction: "Attn"
+      batch_max_length: 25
+      characters: "0123456789가나다라마거너더러머버서어저고노도로모보소오조구누두루무부수우주하허호바사아자배강경광구기남대덕육동등마무문부북산서세수시울원인전제주창천충평포하해영차카안관파양금타악계연지김미홀추중진신은퍼종외교벌용성송목작청명황귀함풍치람롬름리별운봉증옥음읍임실순례장화릉의통령합녕초"
+
+processing:
+  min_confidence: 0.6
+  plate_padding_ratio: 0.5
+  plate_scale_factor: 5
+  jpeg_quality: 80
+
+fonts:
+  paths:
+    - "fonts/NanumGothic.ttf"
+    - "C:/Windows/Fonts/malgun.ttf"
+    - "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
+    - "/System/Library/Fonts/AppleGothic.ttf"
+  size: 30
