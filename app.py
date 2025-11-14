@@ -11,6 +11,7 @@ from models.detector import PlateDetector
 from models.ocr_model import CustomOCRModel
 from utils.annotator import FrameAnnotator
 from processors.video_processor import VideoProcessor
+from flask_cors import CORS
 
 
 class PlateRecognitionApp:
@@ -18,14 +19,20 @@ class PlateRecognitionApp:
     
     def __init__(self, config: Config):
         self.config = config
-        
-        # Flask 초기화
+
         self.app = Flask(__name__)
         self.app.config['SECRET_KEY'] = config.server.secret_key
+        
+        CORS(self.app, resources={r"/*": {"origins": "*"}})
+        
+        # SocketIO 초기화
         self.socketio = SocketIO(
             self.app, 
             cors_allowed_origins="*", 
-            max_http_buffer_size=config.server.max_buffer_size
+            max_http_buffer_size=config.server.max_buffer_size,
+            async_mode='threading',
+            logger=True,
+            engineio_logger=True
         )
         
         # 모델 초기화
@@ -42,8 +49,6 @@ class PlateRecognitionApp:
         
         self.processing_sessions = {}
         self._register_handlers()
-        
-        print("애플리케이션 초기화 완료")
     
     def _register_handlers(self):
         """SocketIO 이벤트 핸들러 등록"""
@@ -51,6 +56,7 @@ class PlateRecognitionApp:
         @self.socketio.on('connect')
         def handle_connect():
             print(f'클라이언트 연결: {request.sid}')
+            emit('connected', {'message': 'Connected to server'})
         
         @self.socketio.on('disconnect')
         def handle_disconnect():
@@ -80,8 +86,6 @@ class PlateRecognitionApp:
             )
             thread.daemon = True
             thread.start()
-
-            process_time = time.time()
             
             emit('upload_success', {'message': '업로드 성공, 처리 시작'})
             
@@ -98,26 +102,9 @@ class PlateRecognitionApp:
             allow_unsafe_werkzeug=True
         )
 
-
-# Flask CLI를 위한 앱 팩토리 함수
-def create_app():
-    """Flask 앱 팩토리"""
-    config = Config('config.yaml')
-    plate_app = PlateRecognitionApp(config)
-    return plate_app.app
-
-
-# SocketIO도 함께 export
-def create_socketio():
-    """SocketIO 인스턴스 생성"""
-    config = Config('config.yaml')
-    plate_app = PlateRecognitionApp(config)
-    return plate_app.socketio
-
-
-# Flask CLI용 전역 변수
-config = Config('./config.yaml')
+config = Config('config.yaml')
 plate_recognition_app = PlateRecognitionApp(config)
+
 app = plate_recognition_app.app
 socketio = plate_recognition_app.socketio
 
