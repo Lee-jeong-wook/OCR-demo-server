@@ -17,7 +17,7 @@ class CustomOCRModel(BaseOCRModel):
     def __init__(self, config: OCRModelConfig):
         self.config = config
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"OCR Model using device: {self.device}")
+        # print(f"OCR Model using device: {self.device}")
         # ...
         self._add_easyocr_path()  # ← 1. 먼저 sys.path에 경로 추가
         self._load_model()
@@ -77,7 +77,7 @@ class CustomOCRModel(BaseOCRModel):
             self.model.load_state_dict(checkpoint)
             self.model.eval()
             
-            print("✓ OCR 모델 로드 완료")
+            # print("✓ OCR 모델 로드 완료")
             
         except ImportError as e:
             raise RuntimeError(f"EasyOCR 모듈 임포트 실패: {e}\n"
@@ -126,7 +126,7 @@ class CustomOCRModel(BaseOCRModel):
             return cleaned_text, confidence
             
         except Exception as e:
-            print(f"OCR 인식 오류: {e}")
+            # print(f"OCR 인식 오류: {e}")
             return "", 0.0
     
     def _preprocess_image(self, image: np.ndarray) -> torch.Tensor:

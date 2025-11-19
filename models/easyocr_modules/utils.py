@@ -50,7 +50,7 @@ class BeamState:
 
             if j == 0: best_text = text
             if text in dict_list:
-                print('found text: ', text)
+                # print('found text: ', text)
                 best_text = text
                 break
             else:
@@ -249,7 +249,7 @@ class CTCLabelConverter(object):
                     [sum(text_lengths)] = [text_index_0 + text_index_1 + ... + text_index_(n - 1)]
             length: length of each text. [batch_size]
         """
-        print(text)
+        # print(text)
         length = [len(s) for s in text]
         text = ''.join(text)
         text = [self.dict[char] for char in text]
@@ -309,7 +309,7 @@ class AttnLabelConverter(object):
 
         self.dict = {}
         for i, char in enumerate(self.character):
-            # print(i, char)
+            # # print(i, char)
             self.dict[char] = i
 
     def encode(self, text, batch_max_length=25):

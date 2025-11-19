@@ -38,7 +38,7 @@ class Model(nn.Module):
                 BidirectionalLSTM(opt.hidden_size, opt.hidden_size, opt.hidden_size))
             self.SequenceModeling_output = opt.hidden_size
         else:
-            print('No SequenceModeling module specified')
+            # print('No SequenceModeling module specified')
             self.SequenceModeling_output = self.FeatureExtraction_output
 
         """ Prediction """

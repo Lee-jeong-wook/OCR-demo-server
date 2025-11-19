@@ -24,7 +24,7 @@ class FrameAnnotator:
             except:
                 continue
         
-        print("⚠ 한글 폰트 로드 실패, 기본 폰트 사용")
+        # print("⚠ 한글 폰트 로드 실패, 기본 폰트 사용")
         return ImageFont.load_default()
     
     def annotate(self, frame: np.ndarray, text: str, position: Tuple[int, int], 

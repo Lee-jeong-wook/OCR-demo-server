@@ -56,7 +56,7 @@ class VideoProcessor:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        duration = int(total_frames / fps)
+        duration = int(total_frames / fps) if(total_frames > 0) else 0
         
         return VideoInfo(width, height, duration, fps)
     
@@ -88,8 +88,9 @@ class VideoProcessor:
         
         return {
             'detected_plates': detected_plates,
-            'video_play_time': time.time() - video_start_time
+            'video_play_time': int(time.time() - video_start_time)
         }
+
     
     def _process_single_frame(self, frame: np.ndarray, detected_plates: Set[str]) -> Tuple:
         """단일 프레임 처리"""
@@ -106,7 +107,7 @@ class VideoProcessor:
             
             if text:
                 detected_plates.add(text)
-                print(f"인식: {text} (신뢰도: {confidence:.3f})")
+                # print(f"인식: {text} (신뢰도: {confidence:.3f})")
             
             status = "success" if confidence >= self.min_confidence else "low_confidence"
             

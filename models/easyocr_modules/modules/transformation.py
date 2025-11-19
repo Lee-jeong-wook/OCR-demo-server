@@ -117,7 +117,7 @@ class GridGenerator(nn.Module):
                 hat_C[j, i] = r
         np.fill_diagonal(hat_C, 1)
         hat_C = (hat_C ** 2) * np.log(hat_C)
-        # print(C.shape, hat_C.shape)
+        # # print(C.shape, hat_C.shape)
         delta_C = np.concatenate(  # F+3 x F+3
             [
                 np.concatenate([np.ones((F, 1)), C, hat_C], axis=1),  # F x F+3

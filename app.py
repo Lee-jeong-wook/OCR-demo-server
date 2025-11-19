@@ -1,6 +1,6 @@
 """Flask application main"""
 
-from flask import Flask, request
+from flask import Flask, request, jsonify, send_file
 from flask_socketio import SocketIO, emit
 import base64
 import threading
@@ -11,7 +11,11 @@ from models.detector import PlateDetector
 from models.ocr_model import CustomOCRModel
 from utils.annotator import FrameAnnotator
 from processors.video_processor import VideoProcessor
+from processors.picture_processor import PictureProcessor
+from werkzeug.utils import secure_filename
 from flask_cors import CORS
+
+import os
 
 
 class PlateRecognitionApp:
@@ -30,13 +34,10 @@ class PlateRecognitionApp:
             self.app, 
             cors_allowed_origins="*", 
             max_http_buffer_size=config.server.max_buffer_size,
-            async_mode='threading',
-            logger=True,
-            engineio_logger=True
+            async_mode='threading'
         )
         
         # 모델 초기화
-        print("모델 로딩 중...")
         self.detector = PlateDetector(config.yolo)
         self.ocr_model = CustomOCRModel(config.ocr)
         self.annotator = FrameAnnotator(config.fonts, config.processing)
@@ -46,27 +47,82 @@ class PlateRecognitionApp:
             self.annotator,
             config.processing
         )
+
+        self.pic_processor = PictureProcessor(
+            self.detector, 
+            self.ocr_model, 
+            self.annotator,
+            config.processing
+        )
         
         self.processing_sessions = {}
         self._register_handlers()
+        self._http_handlers()
     
     def _register_handlers(self):
         """SocketIO 이벤트 핸들러 등록"""
         
         @self.socketio.on('connect')
         def handle_connect():
-            print(f'클라이언트 연결: {request.sid}')
+            # print(f'클라이언트 연결: {request.sid}')
             emit('connected', {'message': 'Connected to server'})
         
         @self.socketio.on('disconnect')
         def handle_disconnect():
-            print(f'클라이언트 연결 해제: {request.sid}')
+            # print(f'클라이언트 연결 해제: {request.sid}')
             if request.sid in self.processing_sessions:
                 del self.processing_sessions[request.sid]
         
         @self.socketio.on('upload_video')
         def handle_upload_video(data):
             self._handle_video_upload(data)
+
+    def _http_handlers(self):
+        """HTTP 이벤트 핸들러 등록"""
+        
+        @self.app.route('/process_images', methods=['POST'])
+        def handle_process_images():
+            try:
+                # 파일 유효성 검사
+                if 'images' not in request.files:
+                    return jsonify({'error': '이미지 파일이 없습니다'}), 400
+                
+                files = request.files.getlist('images')
+                if not files:
+                    return jsonify({'error': '이미지를 선택해주세요'}), 400
+                
+                # 세션 ID 생성
+                session_id = f"session_{int(time.time() * 1000)}"
+                
+                # 파일 저장
+                saved_paths = []
+                allowed_extensions = {'png', 'jpg', 'jpeg', 'bmp', 'webp'}
+                
+                for file in files:
+                    if file and '.' in file.filename:
+                        ext = file.filename.rsplit('.', 1)[1].lower()
+                        if ext in allowed_extensions:
+                            filename = secure_filename(f"{session_id}_{file.filename}")
+                            filepath = os.path.join('./tmp_pictures/', filename)
+                            file.save(filepath)
+                            saved_paths.append(filepath)
+                
+                if not saved_paths:
+                    return jsonify({'error': '유효한 이미지 파일이 없습니다'}), 400
+                
+                # 이미지 처리 - base64로 받음
+                zip_base64, chart_base64 = self.pic_processor.process_picture_to_zip(saved_paths, session_id)
+                
+                # JSON 응답으로 반환
+                return jsonify({
+                    'success': True,
+                    'zip_file': zip_base64,
+                    'chart_data': chart_base64,
+                    'filename': f'plate_recognition_results_{session_id}.zip'
+                })
+            
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
     
     def _handle_video_upload(self, data):
         """비디오 업로드 처리"""
