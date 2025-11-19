@@ -52,7 +52,7 @@ class PictureProcessor:
                 stats = self._process_single_image(frame)
                 frame_list.append({
                     'frame': stats['frame'],
-                    'filename': Path(pic_path).name,
+                    'filename': ''.join(stats['name']),
                     'detections': stats['detections'],
                     'detected_count': len(stats['detections'])
                 })
@@ -90,7 +90,7 @@ class PictureProcessor:
     def _process_single_image(self, frame: np.ndarray) -> dict:
         """단일 이미지 처리"""
         detected_plates: Set[str] = set()
-        annotated_frame, detections, success, fail = self._process_single_frame(
+        annotated_frame, detections, success, fail, name = self._process_single_frame(
             frame, detected_plates
         )
         
@@ -99,7 +99,8 @@ class PictureProcessor:
             'detections': detections,
             'detected_plates': detected_plates,
             'success': success,
-            'fail': fail
+            'fail': fail,
+            'name': name
         }
     
     def _process_single_frame(self, frame: np.ndarray, detected_plates: Set[str]) -> Tuple:
@@ -110,6 +111,8 @@ class PictureProcessor:
         detections = []
         success = 0
         fail = 0
+
+        name: Set[str] = set()
         
         # 탐지된 각 번호판 처리
         for box in boxes:
@@ -132,6 +135,7 @@ class PictureProcessor:
             else:
                 fail += 1
                 status = "fail"
+            name.add(text)
             
             # 바운딩 박스 좌표
             x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -151,7 +155,7 @@ class PictureProcessor:
                 status=status
             ).__dict__)
         
-        return annotated_frame, detections, success, fail
+        return annotated_frame, detections, success, fail, list(name)
     
     def _create_chart(self, success: int, fail: int, total: int, total_detected: int) -> str:
         """통계 차트 생성"""
@@ -255,7 +259,7 @@ class PictureProcessor:
                     if success:
                         # 파일명에서 확장자 분리
                         name_without_ext = os.path.splitext(original_filename)[0]
-                        filename = f"processed_{idx+1:03d}_{name_without_ext}.jpg"
+                        filename = f"{idx+1:03d}_{name_without_ext}.jpg"
                         zipf.writestr(filename, buffer.tobytes())
 
                 # 차트 이미지 추가

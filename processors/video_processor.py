@@ -83,8 +83,6 @@ class VideoProcessor:
                 detections, detected_plates,
                 session_id, socketio
             )
-            
-            time.sleep(1.0 / video_info.fps)
         
         return {
             'detected_plates': detected_plates,
