@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Set, Tuple, List
 from io import BytesIO
 import matplotlib
-matplotlib.use('Agg')  # GUI 없이 사용
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from models.detector import PlateDetector
@@ -59,12 +59,11 @@ class PictureProcessor:
                 
                 total_success += stats['success']
                 total_fail += stats['fail']
-                total_detected += len(stats['detections'])
+                total_detected += stats['total']
 
             chart_base64 = self._create_chart(
                 total_success, 
                 total_fail, 
-                len(pic_paths),
                 total_detected
             )
 
@@ -90,7 +89,7 @@ class PictureProcessor:
     def _process_single_image(self, frame: np.ndarray) -> dict:
         """단일 이미지 처리"""
         detected_plates: Set[str] = set()
-        annotated_frame, detections, success, fail, name = self._process_single_frame(
+        annotated_frame, detections, success, fail, name, total = self._process_single_frame(
             frame, detected_plates
         )
         
@@ -100,7 +99,8 @@ class PictureProcessor:
             'detected_plates': detected_plates,
             'success': success,
             'fail': fail,
-            'name': name
+            'name': name,
+            'total': total
         }
     
     def _process_single_frame(self, frame: np.ndarray, detected_plates: Set[str]) -> Tuple:
@@ -112,14 +112,19 @@ class PictureProcessor:
         success = 0
         fail = 0
 
+        detect_fail = 0
+
         name: Set[str] = set()
+
+        successSet: Set[int] = set()
+        failSet: Set[int] = set()
+
+        if(len(boxes)==0):
+            detect_fail += 1
         
         # 탐지된 각 번호판 처리
         for box in boxes:
             plate_img = self.extractor.extract(frame, box)
-            if plate_img is None:
-                fail += 1
-                continue
             
             # OCR 인식
             text, confidence = self.ocr_model.recognize(plate_img)
@@ -127,10 +132,10 @@ class PictureProcessor:
             # 결과 처리
             if text and confidence >= self.min_confidence:
                 detected_plates.add(text)
-                success += 1
+                successSet.add(text)
                 status = "success"
             elif text:
-                fail += 1
+                failSet.add(text)
                 status = "low_confidence"
             else:
                 fail += 1
@@ -155,9 +160,9 @@ class PictureProcessor:
                 status=status
             ).__dict__)
         
-        return annotated_frame, detections, success, fail, list(name)
+        return annotated_frame, detections, len(successSet), len(failSet) + fail, list(name), (len(successSet) + len(failSet) + fail + detect_fail)
     
-    def _create_chart(self, success: int, fail: int, total: int, total_detected: int) -> str:
+    def _create_chart(self, success: int, fail: int, total: int) -> str:
         """통계 차트 생성"""
         try:
             # 이미지별로 번호판이 없는 경우
@@ -198,16 +203,17 @@ class PictureProcessor:
             ax1.set_title(f'Recognition Results\nTotal Images: {total}', fontsize=14, fontweight='bold')
             
             # 막대 차트
-            ax2.bar(['Success', 'Fail', 'No Detection'], 
+            bar_container = ax2.bar(['Success', 'Fail', 'No Detection'], 
                    [success, fail, no_detection], 
                    color=['#4CAF50', '#FF9800', '#F44336'])
             ax2.set_ylabel('Count', fontsize=12)
+            ax2.bar_label(bar_container, fmt='{:,.0f}')
             ax2.set_title('Detection Statistics', fontsize=14, fontweight='bold')
             ax2.grid(axis='y', alpha=0.3)
             
             # 통계 텍스트 추가
-            stats_text = f'Total Plates Detected: {total_detected}\n'
-            stats_text += f'Success Rate: {(success/total_detected*100) if total_detected > 0 else 0:.1f}%'
+            stats_text = f'Total Plates Detected: {total}\n'
+            stats_text += f'Success Rate: {(success/total*100) if total > 0 else 0:.1f}%'
             fig.text(0.5, 0.02, stats_text, ha='center', fontsize=11, 
                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
             
