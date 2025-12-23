@@ -86,7 +86,7 @@ class PlateRecognitionApp:
                 # 파일 유효성 검사
                 if 'images' not in request.files:
                     return jsonify({'error': '이미지 파일이 없습니다'}), 400
-                
+                print(request)
                 files = request.files.getlist('images')
                 if not files:
                     return jsonify({'error': '이미지를 선택해주세요'}), 400

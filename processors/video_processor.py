@@ -42,7 +42,7 @@ class VideoProcessor:
                 'duration': video_info.duration
             }, room=session_id)
             
-            stats = self._process_frames(cap, video_info, session_id, socketio)
+            stats = self._process_frames(cap, video_info, session_id, socketio, [5, 1])
             self._send_completion(stats, session_id, socketio)
             
         finally:
@@ -61,7 +61,9 @@ class VideoProcessor:
         return VideoInfo(width, height, duration, fps)
     
     def _process_frames(self, cap: cv2.VideoCapture, video_info: VideoInfo, 
-                       session_id: str, socketio) -> dict:
+                       session_id: str, socketio, 
+                       skipFrame: List[int]) -> dict:
+                       # skipFrame은 skipFrame[0]번마다 skipFrame[1]개의 frame을 skip합니다
         """프레임 처리 루프"""
         video_start_time = time.time()
         frame_count = 0
@@ -73,6 +75,8 @@ class VideoProcessor:
                 break
             
             frame_count += 1
+            if(frame_count % skipFrame[0] < skipFrame[1]):
+                continue
             
             annotated_frame, detections = self._process_single_frame(
                 frame, detected_plates
@@ -124,19 +128,17 @@ class VideoProcessor:
             ).__dict__)
         
         return annotated_frame, detections
-    
+
     def _send_frame(self, annotated_frame: np.ndarray,
-                    detections: List, detected_plates: Set,
-                    session_id: str, socketio):
+                detections: List, detected_plates: Set,
+                session_id: str, socketio):
         """프레임 데이터 전송"""
         _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-        frame_base64 = base64.b64encode(buffer).decode('utf-8')
-        
+    
         socketio.emit('frame', {
-            'frame': frame_base64,
-
-            'detections': detections,
-            'stats': {
+        'frame': buffer.tobytes(),
+        'detections': detections,
+        'stats': {
                 'total_detected': len(detected_plates)
             }
         }, room=session_id)
