@@ -1,10 +1,12 @@
 """Flask application main"""
 
 from flask import Flask, request, jsonify, send_file
-from flask_socketio import SocketIO, emit
+from flask_sock import Sock
 import base64
 import threading
 import time
+import json
+import uuid
 
 from config import Config
 from models.detector import PlateDetector
@@ -29,13 +31,8 @@ class PlateRecognitionApp:
         
         CORS(self.app, resources={r"/*": {"origins": "*"}})
         
-        # SocketIO 초기화
-        self.socketio = SocketIO(
-            self.app, 
-            cors_allowed_origins="*", 
-            max_http_buffer_size=config.server.max_buffer_size,
-            async_mode='threading'
-        )
+        # Flask-Sock 초기화
+        self.sock = Sock(self.app)
         
         # 모델 초기화
         self.detector = PlateDetector(config.yolo)
@@ -60,22 +57,102 @@ class PlateRecognitionApp:
         self._http_handlers()
     
     def _register_handlers(self):
-        """SocketIO 이벤트 핸들러 등록"""
+        """WebSocket 핸들러 등록"""
         
-        @self.socketio.on('connect')
-        def handle_connect():
-            # print(f'클라이언트 연결: {request.sid}')
-            emit('connected', {'message': 'Connected to server'})
+        @self.sock.route('/ws')
+        def websocket_handler(ws):
+            """WebSocket 연결 핸들러"""
+            session_id = str(uuid.uuid4())
+            print(f"Connected to server: {session_id}")
+            self.processing_sessions[session_id] = {
+                'ws': ws,
+                'status': 'connected'
+            }
+            
+            try:
+                # 연결 성공 메시지 전송
+                ws.send(json.dumps({
+                    'type': 'connected',
+                    'message': 'Connected to server',
+                    'session_id': session_id
+                }))
+                
+                while True:
+                    try:
+                        message = ws.receive(timeout=1)
+                        if message:
+                            # Check if message is bytes or string
+                            if isinstance(message, bytes):
+                                # Binary data - convert to string if it's text-based
+                                try:
+                                    message = message.decode('utf-8')
+                                    data = json.loads(message)
+                                    self._handle_websocket_message(data, session_id, ws)
+                                except (UnicodeDecodeError, json.JSONDecodeError):
+                                    # Actual binary data
+                                    self._handle_binary_upload(message, session_id, ws)
+                            else:
+                                # String message
+                                data = json.loads(message)
+                                self._handle_websocket_message(data, session_id, ws)
+                    except TimeoutError:
+                        # 타임아웃은 정상 (keep-alive)
+                        continue
+                    except json.JSONDecodeError as e:
+                        print(f"JSON decode error: {e}")
+                        continue
+                    except Exception as e:
+                        print(f"Error receiving message: {e}")
+                        break
+                        
+            except Exception as e:
+                print(f"WebSocket error: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                if session_id in self.processing_sessions:
+                    del self.processing_sessions[session_id]
+    
+    def _handle_websocket_message(self, data: dict, session_id: str, ws):
+        """WebSocket 메시지 처리"""
+        msg_type = data.get('type')
         
-        @self.socketio.on('disconnect')
-        def handle_disconnect():
-            # print(f'클라이언트 연결 해제: {request.sid}')
-            if request.sid in self.processing_sessions:
-                del self.processing_sessions[request.sid]
+        if msg_type == 'buffer_image':
+            self._handle_buffer_image(data, session_id, ws)
+        else:
+            print(f"Unknown message type: {msg_type}")
+    
+    def _handle_buffer_image(self, data: dict, session_id: str, ws):
+        """Base64로 인코딩된 이미지 처리"""
+        print(f"📥 Received buffer_image (Base64) from {session_id}")
         
-        @self.socketio.on('upload_video')
-        def handle_upload_video(data):
-            self._handle_video_upload(data)
+        try:
+            # Base64 데이터 추출
+            if 'data' not in data:
+                raise ValueError("'data' field is missing")
+            
+            base64_data = data['data']
+            image_bytes = base64.b64decode(base64_data)
+            
+            # 즉시 수신 확인
+            ws.send(json.dumps({
+                'type': 'received',
+                'message': 'buffer_image_received',
+                'session_id': session_id
+            }))
+            
+            # 이미지 처리
+            self._process_image_bytes(image_bytes, session_id, ws)
+            
+        except Exception as e:
+            print(f"❌ Error in buffer_image handler: {e}")
+            import traceback
+            traceback.print_exc()
+            ws.send(json.dumps({
+                'type': 'error',
+                'message': f'이미지 처리 실패: {str(e)}',
+                'session_id': session_id
+            }))
 
     def _http_handlers(self):
         """HTTP 이벤트 핸들러 등록"""
@@ -124,45 +201,108 @@ class PlateRecognitionApp:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
     
-    def _handle_video_upload(self, data):
-        """비디오 업로드 처리"""
+    def _handle_binary_upload(self, binary_data: bytes, session_id: str, ws):
+        """바이너리 이미지 데이터 업로드 처리"""
+        print(f"📥 Received binary image data from {session_id}")
+        print(f"Data size: {len(binary_data) if binary_data else 0} bytes")
+        
         try:
-            session_id = request.sid
-            video_data = base64.b64decode(data['video'].split(',')[1])
+            # 즉시 수신 확인
+            ws.send(json.dumps({
+                'type': 'received',
+                'message': 'buffer_image_received',
+                'session_id': session_id
+            }))
             
-            temp_path = f'temp_video_{session_id}_{time.time()}.mp4'
-            with open(temp_path, 'wb') as f:
-                f.write(video_data)
-            
-            self.processing_sessions[session_id] = 'processing'
-            
-            thread = threading.Thread(
-                target=self.processor.process_video,
-                args=(temp_path, session_id, self.socketio)
-            )
-            thread.daemon = True
-            thread.start()
-            
-            emit('upload_success', {'message': '업로드 성공, 처리 시작'})
+            # 이미지 처리
+            self._process_image_bytes(binary_data, session_id, ws)
             
         except Exception as e:
-            emit('error', {'message': f'업로드 실패: {str(e)}'})
+            print(f"❌ Error in binary upload handler: {e}")
+            import traceback
+            traceback.print_exc()
+            ws.send(json.dumps({
+                'type': 'error',
+                'message': f'이미지 처리 실패: {str(e)}',
+                'session_id': session_id
+            }))
+    
+    def _process_image_bytes(self, image_bytes: bytes, session_id: str, ws):
+        """이미지 바이트 데이터 처리"""
+        import cv2
+        import numpy as np
+        from io import BytesIO
+        
+        try:
+            # 바이트를 numpy 배열로 변환
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if image is None:
+                raise ValueError("Failed to decode image")
+            
+            # 이미지 처리
+            self.processing_sessions[session_id]['status'] = 'processing'
+            
+            # 처리 시작 알림
+            ws.send(json.dumps({
+                'type': 'upload_success',
+                'message': '업로드 성공, 처리 시작',
+                'session_id': session_id
+            }))
+            
+            # 이미지 처리 (단일 이미지)
+            result = self.pic_processor._process_single_image(image)
+            
+            # 결과 전송
+            annotated_image = result['frame']
+            detections = result['detections']
+            
+            # 이미지를 JPEG로 인코딩
+            _, buffer = cv2.imencode('.jpg', annotated_image, [cv2.IMWRITE_JPEG_QUALITY, self.config.processing.jpeg_quality])
+            frame_base64 = base64.b64encode(buffer.tobytes()).decode('utf-8')
+            
+            ws.send(json.dumps({
+                'type': 'frame',
+                'frame': frame_base64,
+                'detections': detections,
+                'stats': {
+                    'total_detected': len(result['detected_plates']),
+                    'detected_plates': list(result['detected_plates'])
+                }
+            }))
+            
+            # 완료 메시지
+            ws.send(json.dumps({
+                'type': 'completed',
+                'message': '이미지 처리 완료',
+                'total_plates': len(result['detected_plates']),
+                'plates': list(result['detected_plates'])
+            }))
+            
+        except Exception as e:
+            print(f"❌ Error processing image: {e}")
+            import traceback
+            traceback.print_exc()
+            ws.send(json.dumps({
+                'type': 'error',
+                'message': f'이미지 처리 중 오류: {str(e)}',
+                'session_id': session_id
+            }))
     
     def run(self):
         """애플리케이션 실행"""
-        self.socketio.run(
-            self.app, 
+        self.app.run(
             host=self.config.server.host, 
             port=self.config.server.port, 
-            debug=self.config.server.debug, 
-            allow_unsafe_werkzeug=True
+            debug=self.config.server.debug
         )
 
 config = Config('config.yaml')
 plate_recognition_app = PlateRecognitionApp(config)
 
 app = plate_recognition_app.app
-socketio = plate_recognition_app.socketio
+sock = plate_recognition_app.sock
 
 
 if __name__ == '__main__':

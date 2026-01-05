@@ -4,8 +4,9 @@ import cv2
 import numpy as np
 import base64
 import time
+import json
 from pathlib import Path
-from typing import Set, Tuple, List
+from typing import Set, Tuple, List, Dict
 
 from models.detector import PlateDetector
 from models.base import BaseOCRModel
@@ -28,22 +29,22 @@ class VideoProcessor:
         self.min_confidence = config.min_confidence
         self.jpeg_quality = config.jpeg_quality
     
-    def process_video(self, video_path: str, session_id: str, socketio):
+    def process_video(self, video_path: str, session_id: str, processing_sessions: Dict):
         """비디오 처리 및 실시간 전송"""
         cap = cv2.VideoCapture(video_path)
         
         if not cap.isOpened():
-            socketio.emit('error', {'message': 'Could not open video'}, room=session_id)
+            self._send_message(processing_sessions, session_id, 'error', {'message': 'Could not open video'})
             return
         
         try:
             video_info = self._get_video_info(cap)
-            socketio.emit('video_info', {
+            self._send_message(processing_sessions, session_id, 'video_info', {
                 'duration': video_info.duration
-            }, room=session_id)
+            })
             
-            stats = self._process_frames(cap, video_info, session_id, socketio, [5, 1])
-            self._send_completion(stats, session_id, socketio)
+            stats = self._process_frames(cap, video_info, session_id, processing_sessions, [5, 1])
+            self._send_completion(stats, session_id, processing_sessions)
             
         finally:
             cap.release()
@@ -61,7 +62,7 @@ class VideoProcessor:
         return VideoInfo(width, height, duration, fps)
     
     def _process_frames(self, cap: cv2.VideoCapture, video_info: VideoInfo, 
-                       session_id: str, socketio, 
+                       session_id: str, processing_sessions: Dict, 
                        skipFrame: List[int]) -> dict:
                        # skipFrame은 skipFrame[0]번마다 skipFrame[1]개의 frame을 skip합니다
         """프레임 처리 루프"""
@@ -85,7 +86,7 @@ class VideoProcessor:
             self._send_frame(
                 annotated_frame,
                 detections, detected_plates,
-                session_id, socketio
+                session_id, processing_sessions
             )
         
         return {
@@ -131,27 +132,47 @@ class VideoProcessor:
 
     def _send_frame(self, annotated_frame: np.ndarray,
                 detections: List, detected_plates: Set,
-                session_id: str, socketio):
+                session_id: str, processing_sessions: Dict):
         """프레임 데이터 전송"""
         _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-    
-        socketio.emit('frame', {
-        'frame': buffer.tobytes(),
-        'detections': detections,
-        'stats': {
+        
+        # Base64로 인코딩하여 JSON으로 전송
+        frame_base64 = base64.b64encode(buffer.tobytes()).decode('utf-8')
+        
+        self._send_message(processing_sessions, session_id, 'frame', {
+            'frame': frame_base64,
+            'detections': detections,
+            'stats': {
                 'total_detected': len(detected_plates)
             }
-        }, room=session_id)
+        })
     
     @staticmethod
-    def _send_completion(stats: dict, session_id: str, socketio):
+    def _send_message(processing_sessions: Dict, session_id: str, msg_type: str, data: dict):
+        """WebSocket 메시지 전송"""
+        if session_id not in processing_sessions:
+            return
+        
+        ws = processing_sessions[session_id].get('ws')
+        if ws:
+            try:
+                message = {
+                    'type': msg_type,
+                    **data
+                }
+                ws.send(json.dumps(message))
+            except Exception as e:
+                print(f"Error sending message: {e}")
+    
+    @staticmethod
+    def _send_completion(stats: dict, session_id: str, processing_sessions: Dict):
         """완료 신호 전송"""
-        socketio.emit('completed', {
+        VideoProcessor._send_message(processing_sessions, session_id, 'completed', {
             'message': 'Processing completed',
             'total_plates': len(stats['detected_plates']),
             'plates': list(stats['detected_plates']),
             'video_play_time': stats['video_play_time']
-        }, room=session_id)
+        })
     
     @staticmethod
     def _cleanup(video_path: str):
